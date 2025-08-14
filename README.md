@@ -2,6 +2,8 @@
 
 This script uses the Onshape API to export all part studio configurations as STLs to an out/ directory.
 
+Git clone/download the repository
+
 Create an secrets.env file with the following:
 
 ```
@@ -21,7 +23,17 @@ Open a part studio and note the URL:
 https://cad.onshape.com/documents/<Document ID>/w/<WVMID>/e/<EID>
 ```
 
-The script will grab the FIRST part in the part studio.
+Run
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip3 install -r requirements.txt
+python3 getNameTags.py
+```
+
+The script will grab the FIRST part in the part studio, outputting to out/.
 
 ## How it works
 
