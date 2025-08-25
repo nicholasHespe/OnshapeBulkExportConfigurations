@@ -3,6 +3,7 @@ import base64
 import requests
 import time
 import json
+import zipfile
 from dotenv import load_dotenv
 
 load_dotenv("secrets.env")
@@ -88,6 +89,7 @@ if elementType == "PARTSTUDIO":
 # ----------------------------------------------------------------------
 # Step 3: Get all configuration options (works for both Part Studios & Assemblies)
 # ----------------------------------------------------------------------
+print("Getting all configs...")
 configurationURL = f"https://cad.onshape.com/api/v12/elements/d/{DID}/{WVM}/{WVMID}/e/{EID}/configuration"
 response = requests.get(configurationURL, headers=headers_json)
 response.raise_for_status()
@@ -101,7 +103,12 @@ parameterId = configData["configurationParameters"][0]["parameterId"]
 # ----------------------------------------------------------------------
 os.makedirs("out", exist_ok=True)
 
+print(f"Found {len(allConfigurationsOptions)} configurations")
+#print(allConfigurationsOptions)
+
 for option in allConfigurationsOptions:
+    if option['option'] == "Default":
+        continue  # Skip default config if present
     print(f"\nProcessing configuration: {option['option']}")
     
     # Encode config
@@ -126,9 +133,9 @@ for option in allConfigurationsOptions:
     if elementType == "PARTSTUDIO":
         # For Part Studios, use the parts export endpoint
         if export_format == "sldprt":
-            export_url = f"https://cad.onshape.com/api/v12/parts/d/{DID}/{WVM}/{WVMID}/e/{EID}/export/solidworks"
+            export_url = f"https://cad.onshape.com/api/v12/partstudios/d/{DID}/{WVM}/{WVMID}/e/{EID}/export/solidworks"
         else:
-            export_url = f"https://cad.onshape.com/api/v12/parts/d/{DID}/{WVM}/{WVMID}/e/{EID}/export/{export_format}"
+            export_url = f"https://cad.onshape.com/api/v12/partstudios/d/{DID}/{WVM}/{WVMID}/e/{EID}/export/{export_format}"
     else:  # ASSEMBLY
         # For Assemblies, use the assemblies export endpoint
         if export_format == "sldprt":
@@ -139,7 +146,11 @@ for option in allConfigurationsOptions:
     # Add configuration to URL if we have one
     if encodedId:
         export_url += f"?configuration={encodedId}"
-    
+
+    if elementType == "PARTSTUDIO":
+        export_url += "&includeExportIds=false&binaryExport=false"
+
+    #export_url = export_url.replace("=", "%3D")
     print(f"Export URL: {export_url}")
     
     # ------------------------------------------------------------------
@@ -156,12 +167,13 @@ for option in allConfigurationsOptions:
     if export_format in ["obj", "gltf"]:
         # Mesh formats need mesh parameters
         export_payload["meshParams"] = {
-            "angularTolerance": 0.001,
-            "distanceTolerance": 0.001,
-            "maximumChordLength": 0.01,
+            "angularTolerance": 0.1,
+            "distanceTolerance": 0.1,
+            "maximumChordLength": 1.0,
             "resolution": "FINE",
             "unit": "METER"
         }
+
     
     # For Part Studios, we need to specify which part(s) to export
     if elementType == "PARTSTUDIO" and partID:
@@ -179,14 +191,14 @@ for option in allConfigurationsOptions:
     translation_data = export_response.json()
     translation_id = translation_data["id"]
     
-    print(f"Translation ID: {translation_id}")
+    #print(f"Translation ID: {translation_id}")
     
     # ------------------------------------------------------------------
     # Step 4d: Poll translation status until complete
     # ------------------------------------------------------------------
     
     translation_status_url = f"https://cad.onshape.com/api/v12/translations/{translation_id}"
-    print("Polling translation status...")
+    print("Polling translation status...", end="", flush=True)
     
     max_attempts = 60  # Maximum number of polling attempts
     attempt = 0
@@ -197,17 +209,16 @@ for option in allConfigurationsOptions:
         status_data = status_response.json()
         
         request_state = status_data["requestState"]
-        print(f"Attempt {attempt + 1}: Translation state = {request_state}")
         
         if request_state == "DONE":
-            print("Translation completed successfully!")
+            print("   Translation completed successfully!")
             break
         elif request_state == "FAILED":
             failure_reason = status_data.get("failureReason", "Unknown error")
             raise Exception(f"Translation failed: {failure_reason}")
         elif request_state == "ACTIVE":
-            print("Translation in progress, waiting...")
-            time.sleep(1)  # Wait 5 seconds before next poll
+            print(".", end="", flush=True)
+            time.sleep(1)  # Wait 1 second before next poll
             attempt += 1
         else:
             print(f"Unknown state: {request_state}, continuing to poll...")
@@ -230,28 +241,52 @@ for option in allConfigurationsOptions:
     
     external_data_id = result_external_data_ids[0]  # Take the first result
     print(f"External data ID: {external_data_id}")
+    print(result_external_data_ids)
     
     # Get the download URL using the external data endpoint
     download_info_url = f"https://cad.onshape.com/api/v6/documents/d/{DID}/externaldata/{external_data_id}"
     
-    print("Downloding exported file...")
+    print(f"Downloding exported file... from {download_info_url}")
     download_info_response = requests.get(download_info_url, headers=headers_json)
     download_info_response.raise_for_status()
     
-    if download_info_response.status_code == 200:        
-        # Create filename based on configuration and format
+    if download_info_response.status_code == 200:
         safe_config_name = "".join(c for c in option["option"] if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        filename = f"{safe_config_name}.{file_ext}"
-        filepath = os.path.join("out", filename)
+        if export_format in ["obj", "gltf"]:
+            # For mesh formats, OnShape returns a zip file
+            filename = f"{safe_config_name}.zip"
+            filepath = os.path.join("out", filename)
         
-        # Save the downloaded file
-        with open(filepath, "w") as f:
-            f.write(download_info_response.text)
+            # Save the downloaded zip file
+            with open(filepath, "wb") as f:
+                f.write(download_info_response.content)
+            
+            # Unzip the file
+            print(f"Unzipping {filename}...")
+            with zipfile.ZipFile(filepath, 'r') as zip_ref:
+                # Create a subfolder with the configuration name
+                extract_path = os.path.join("out", safe_config_name)
+                os.makedirs(extract_path, exist_ok=True)
+                zip_ref.extractall(extract_path)
+            
+            # Remove the zip file after extraction
+            os.remove(filepath)
+            print(f"Files extracted to: {extract_path}")
+            filepath = extract_path  # Update filepath to the folder
+        else:        
+            # Create filename based on configuration and format
+            filename = f"{safe_config_name}.{file_ext}"
+            filepath = os.path.join("out", filename)
+            
+            # Save the downloaded file
+            with open(filepath, "wb") as f:
+                f.write(download_info_response.content)
 
         print(f"File saved as: {filepath}")
         print(f"File size: {os.path.getsize(filepath)} bytes")
     else:
         raise Exception(f"Failed to get download URL. Status: {download_info_response.status_code}")
+    break  # Process only the first configuration for testing
     
 
 print(f"\nAll configurations exported successfully!")
