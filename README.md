@@ -1,6 +1,8 @@
-# Onshape Bulk Export Part Studio Configurations
+# Onshape Bulk Export Configurations
 
-This script uses the Onshape API to export all part studio configurations as STLs to an out/ directory.
+This script uses the Onshape API to export all configurations to an out/ directory.
+
+Credit to ([ZimengXiong](https://github.com/ZimengXiong)), project was based on their repo https://github.com/ZimengXiong/OnshapeBulkExportConfigurations
 
 Git clone/download the repository
 
@@ -9,15 +11,11 @@ Create an secrets.env file with the following:
 ```
 ONSHAPE_ACCESS_KEY=
 ONSHAPE_SECRET_KEY=
-DOCUMENT_ID=
-WVM=w
-WVMID=
-EID=
 ```
 
 Generate an API Key by going to the [Onshape Dev Portal](https://cad.onshape.com/appstore/dev-portal)
 
-Open a part studio and note the URL:
+Open a part studio and copy the URL:
 
 ```
 https://cad.onshape.com/documents/<Document ID>/w/<WVMID>/e/<EID>
@@ -30,54 +28,46 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 pip3 install -r requirements.txt
-python3 getNameTags.py
+python3 ExportOnshapeConfigs.py
 ```
 
-The script will grab the FIRST part in the part studio, outputting to out/.
+When prompted, enter your document URL then select the output format
 
-## How it works
+## Program Overview
 
-```
-1. Use the parts endpoint to grab the partID:
-    partURL = f"https://cad.onshape.com/api/v12/parts/d/{DID}/{WVM}/{WVMID}/e/{EID}?withThumbnails=false&includePropertyDefaults=false"
+This script automates exporting **all configurations** of an Onshape Part Studio or Assembly into selected CAD formats.  
 
-2. Get all configurations for the part studio
-    configurationURL = f"https://cad.onshape.com/api/v12/elements/d/{DID}/{WVM}/{WVMID}/e/{EID}/configuration"
+### Key Steps
+1. **User Input**  
+   - Prompt for Onshape document link.  
+   - Prompt for desired export format (`STEP`, `OBJ`, `GLTF`, `SolidWorks`).  
 
-    data = response.json()
-    allConfigurationsOptions = data["configurationParameters"][0]["options"]
+2. **Document Parsing**  
+   - Extract document/workspace/version/element IDs from the provided link.  
+   - Detect whether the element is a Part Studio or Assembly.  
 
-3. For each option, encode a configuration string to use for API requests
-    encodeConfigurationURL = f"https://cad.onshape.com/api/v12/elements/d/{DID}/e/{EID}/configurationencodings"
-    headers = {"Authorization": f"Basic {token}", "Accept": "application/json"}
-    payload = {
-        "parameters": [
-            {
-                "parameterId": data["configurationParameters"][0]["parameterId"],
-                "parameterValue": option["option"],
-            }
-        ],
-    }
+3. **Configuration Retrieval**  
+   - Query the Onshape API to get all available configuration options.  
 
-4. Get a 307 redirect URL for each option with the encoded configuration string
-    getSTLURL = f"https://cad.onshape.com/api/v12/partstudios/d/{DID}/{WVM}/{WVMID}/e/{EID}/stl?partIds={partID}&version=0&includeExportIds=false&configuration={encodedId}&binaryExport=false"
-    headers = {
-        "Authorization": f"Basic {token}",
-        "Accept": "*/*",
-    }
+4. **Export Loop**  
+   For each configuration:  
+   - Encode configuration ID.  
+   - Build the appropriate export URL (different for Part Studios vs Assemblies).  
+   - Create an export request with format-specific parameters.  
+   - Poll the Onshape API until translation/export is complete.  
+   - Download the exported file to the `out/` directory.  
 
-    response = requests.get(getSTLURL, headers=headers, allow_redirects=False)
+5. **Output**  
+   - Each configuration is saved as a separate file named after its configuration option.  
+   - All exports are stored in the `out/` folder.  
 
-5. Authenticate and stream the redirect file
-    download_url = response.headers["Location"]
-    print("Download URL:", download_url)
+### Highlights
+- Supports **multiple export formats**.  
+- Handles **both Part Studios and Assemblies**.  
+- Automatically polls until the export is complete.  
+- Saves results locally with descriptive filenames.  
 
-    file_path = os.path.join("out", option["optionName"] + ".stl")
-    with requests.get(download_url, headers=headers, stream=True) as r:
-        r.raise_for_status()
-        with open(file_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
-
-
-```
+### Furtue Upgrades
+ - Drawing
+ - STLs
+ - Any filetype
