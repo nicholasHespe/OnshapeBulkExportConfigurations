@@ -95,6 +95,8 @@ response = requests.get(configurationURL, headers=headers_json)
 response.raise_for_status()
 configData = response.json()
 
+print("Configuration data:", json.dumps(configData, indent=2))
+
 allConfigurationsOptions = configData["configurationParameters"][0]["options"]
 parameterId = configData["configurationParameters"][0]["parameterId"]
 
@@ -109,7 +111,7 @@ print(f"Found {len(allConfigurationsOptions)} configurations")
 for option in allConfigurationsOptions:
     if option['option'] == "Default":
         continue  # Skip default config if present
-    print(f"\nProcessing configuration: {option['option']}")
+    print(f"\nProcessing configuration: {option['optionName']}")
     
     # Encode config
     encodeConfigurationURL = f"https://cad.onshape.com/api/v12/elements/d/{DID}/e/{EID}/configurationencodings"
@@ -121,10 +123,11 @@ for option in allConfigurationsOptions:
             }
         ],
     }
-    response = requests.post(encodeConfigurationURL, headers=headers_json, json=payload)
-    response.raise_for_status()
-    encodedId = response.json()["encodedId"]
-    encodedId = encodedId.replace("=", "%3D")
+    configResponse = requests.post(encodeConfigurationURL, headers=headers_json, json=payload)
+    configResponse.raise_for_status()
+    print(configResponse.json())
+
+
 
     # ------------------------------------------------------------------
     # Step 4a: Build export URL depending on element type and format
@@ -143,12 +146,9 @@ for option in allConfigurationsOptions:
         else:
             export_url = f"https://cad.onshape.com/api/v12/assemblies/d/{DID}/{WVM}/{WVMID}/e/{EID}/export/{export_format}"
     
-    # Add configuration to URL if we have one
-    if encodedId:
-        export_url += f"?configuration={encodedId}"
-
-    if elementType == "PARTSTUDIO":
-        export_url += "&includeExportIds=false&binaryExport=false"
+    # Add configuration to URL
+    if configResponse.json()["queryParam"]:
+        export_url += f"?{configResponse.json()["queryParam"]}"
 
     #export_url = export_url.replace("=", "%3D")
     print(f"Export URL: {export_url}")
@@ -176,8 +176,8 @@ for option in allConfigurationsOptions:
 
     
     # For Part Studios, we need to specify which part(s) to export
-    if elementType == "PARTSTUDIO" and partID:
-        export_payload["partIds"] = [partID]
+    # if elementType == "PARTSTUDIO" and partID:
+    #     export_payload["partIds"] = [partID]
     
     print(f"Export payload: {json.dumps(export_payload, indent=2)}")
     
