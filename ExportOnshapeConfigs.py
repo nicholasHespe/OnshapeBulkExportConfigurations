@@ -11,27 +11,35 @@ load_dotenv("secrets.env")
 ACCESS_KEY = os.getenv("ONSHAPE_ACCESS_KEY")
 SECRET_KEY = os.getenv("ONSHAPE_SECRET_KEY")
 
+DID = os.getenv("DOCUMENT_ID")
+WVM = os.getenv("WVM")
+WVMID = os.getenv("WVMID")
+EID = os.getenv("EID")
+
+if not all([ACCESS_KEY, SECRET_KEY]):
+    raise Exception("Missing OnShape API keys in environment variables")
+
 token = base64.b64encode(f"{ACCESS_KEY}:{SECRET_KEY}".encode()).decode()
 headers_json = {"Authorization": f"Basic {token}", "Accept": "application/json"}
 
 # ----------------------------------------------------------------------
 # Step 0a: Ask user for document link
 # ----------------------------------------------------------------------
+if not all([DID, WVM, WVMID, EID]):
+    print("Please enter the OnShape document link (e.g. https://cad.onshape.com/documents/xxxx/w/yyyy/e/zzzz):")
+    doc_link = input("Link: ").strip()
+    if not doc_link:
+        raise Exception("No link provided")
 
-print("Please enter the OnShape document link (e.g. https://cad.onshape.com/documents/xxxx/w/yyyy/e/zzzz):")
-doc_link = input("Link: ").strip()
-if not doc_link:
-    raise Exception("No link provided")
-
-# Parse the link to extract DID, WVM, WVMID, EID
-try:
-    parts = doc_link.split("/")
-    DID = parts[4]
-    WVM = parts[5]
-    WVMID = parts[6]
-    EID = parts[8]
-except Exception as e:
-    raise Exception("Invalid link format") from e
+    # Parse the link to extract DID, WVM, WVMID, EID
+    try:
+        parts = doc_link.split("/")
+        DID = parts[4]
+        WVM = parts[5]
+        WVMID = parts[6]
+        EID = parts[8]
+    except Exception as e:
+        raise Exception("Invalid link format") from e
 
 # ----------------------------------------------------------------------
 # Step 0b: Ask user for export type
@@ -125,7 +133,7 @@ for option in allConfigurationsOptions:
     }
     configResponse = requests.post(encodeConfigurationURL, headers=headers_json, json=payload)
     configResponse.raise_for_status()
-    print(configResponse.json())
+    #print(configResponse.json())
 
 
 
@@ -151,16 +159,20 @@ for option in allConfigurationsOptions:
         export_url += f"?{configResponse.json()["queryParam"]}"
 
     #export_url = export_url.replace("=", "%3D")
-    print(f"Export URL: {export_url}")
+    #print(f"Export URL: {export_url}")
     
     # ------------------------------------------------------------------
     # Step 4b: Prepare export request body
     # ------------------------------------------------------------------
     
     export_payload = {
-        "storeInDocument": False,  # Changed to False for direct download URLs
+        "advancedParams": {
+            "configuration": configResponse.json()["encodedId"]
+        },
+        "storeInDocument": False,
         "notifyUser": False,
         "grouping": True,
+        
     }
     
     # Add format-specific parameters
@@ -179,7 +191,7 @@ for option in allConfigurationsOptions:
     # if elementType == "PARTSTUDIO" and partID:
     #     export_payload["partIds"] = [partID]
     
-    print(f"Export payload: {json.dumps(export_payload, indent=2)}")
+    #print(f"Export payload: {json.dumps(export_payload, indent=2)}")
     
     # ------------------------------------------------------------------
     # Step 4c: Make the export request
@@ -251,7 +263,7 @@ for option in allConfigurationsOptions:
     download_info_response.raise_for_status()
     
     if download_info_response.status_code == 200:
-        safe_config_name = "".join(c for c in option["option"] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        safe_config_name = "".join(c for c in option["optionName"] if c.isalnum() or c in (' ', '-', '_')).rstrip()
         if export_format in ["obj", "gltf"]:
             # For mesh formats, OnShape returns a zip file
             filename = f"{safe_config_name}.zip"
@@ -286,7 +298,6 @@ for option in allConfigurationsOptions:
         print(f"File size: {os.path.getsize(filepath)} bytes")
     else:
         raise Exception(f"Failed to get download URL. Status: {download_info_response.status_code}")
-    break  # Process only the first configuration for testing
     
 
 print(f"\nAll configurations exported successfully!")
